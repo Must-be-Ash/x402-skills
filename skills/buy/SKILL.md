@@ -11,6 +11,37 @@ Enable AI agents to autonomously pay for HTTP resources using the x402 payment p
 
 x402 is an open payment standard that enables programmatic payments over HTTP. When an agent requests a paid resource, the server responds with HTTP 402 (Payment Required) containing payment details. The agent signs a payment authorization and retries the request.
 
+## CRITICAL: Pre-Flight Check (Do This First!)
+
+**ALWAYS check the endpoint's x402 version BEFORE writing any payment code.**
+
+```bash
+curl -i "https://example.com/api/paid-endpoint"
+```
+
+Look at the 402 response to determine which version and packages to use:
+
+### How to Identify Version
+
+| Check This | v1 (Legacy) | v2 (Current) |
+|------------|-------------|--------------|
+| `x402Version` field | `1` | `2` |
+| Network format | `"base"`, `"base-sepolia"` | `"eip155:8453"`, `"eip155:84532"` (CAIP-2) |
+| Requirements location | Body only | `PAYMENT-REQUIRED` header |
+| Payment header to send | `X-PAYMENT` | `PAYMENT-SIGNATURE` |
+| Response header | `X-PAYMENT-RESPONSE` | `PAYMENT-RESPONSE` |
+
+**Example v1 response:**
+```json
+{"x402Version":1,"accepts":[{"network":"base","maxAmountRequired":"2000",...}]}
+```
+
+**Example v2 response:**
+```
+PAYMENT-REQUIRED: <base64-encoded>
+{"x402Version":2,"accepts":[{"network":"eip155:8453","maxAmountRequired":"2000",...}]}
+```
+
 ## Quick Start
 
 ### 1. Setup Wallet
@@ -30,150 +61,196 @@ npx add-wallet topup testnet
 
 This creates a `.env` file with `WALLET_ADDRESS` and `WALLET_PRIVATE_KEY`.
 
-**Or use a private key directly:**
+### 2. Install Packages (Based on Version)
 
-```typescript
-import { privateKeyToAccount } from "viem/accounts";
-const signer = privateKeyToAccount(process.env.WALLET_PRIVATE_KEY as `0x${string}`);
-console.log("Address:", signer.address);
+**For v1 endpoints:**
+```bash
+npm install x402-fetch viem
 ```
 
-### 2. Install Packages
-
+**For v2 endpoints:**
 ```bash
-npm install @x402/fetch @x402/evm    # For EVM networks
-npm install @x402/svm                 # For Solana (optional)
+npm install @x402/fetch @x402/evm viem
+# Optional for Solana: npm install @x402/svm @solana/kit @scure/base
 ```
 
 ### 3. Make Paid Requests
+
+#### For v1 Endpoints (Legacy)
+
+```typescript
+import { wrapFetchWithPayment, createSigner, decodeXPaymentResponse } from "x402-fetch";
+
+const privateKey = process.env.WALLET_PRIVATE_KEY as `0x${string}`;
+
+// Use network string from 402 response: "base", "base-sepolia", "solana", etc.
+const signer = await createSigner("base", privateKey);
+const fetchWithPayment = wrapFetchWithPayment(fetch, signer);
+
+const response = await fetchWithPayment("https://api.example.com/paid", { method: "GET" });
+const data = await response.json();
+
+// Check payment receipt
+const paymentResponse = response.headers.get("x-payment-response");
+if (paymentResponse) {
+  const receipt = decodeXPaymentResponse(paymentResponse);
+  console.log("Payment settled:", receipt);
+}
+```
+
+#### For v2 Endpoints (Current)
 
 ```typescript
 import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import { privateKeyToAccount } from "viem/accounts";
 
-const signer = privateKeyToAccount(process.env.EVM_PRIVATE_KEY as `0x${string}`);
+const signer = privateKeyToAccount(process.env.WALLET_PRIVATE_KEY as `0x${string}`);
 const client = new x402Client();
 registerExactEvmScheme(client, { signer });
 
 const fetchWithPayment = wrapFetchWithPayment(fetch, client);
-// SDK automatically handles 402 responses and pays on Base mainnet (eip155:8453)
 const response = await fetchWithPayment("https://api.example.com/paid", { method: "GET" });
+
+// Check payment receipt
+const paymentResponse = response.headers.get("PAYMENT-RESPONSE");
 ```
 
-## Payment Flow
+## Package Reference
 
-1. **Initial Request** - Make HTTP request to resource
-2. **402 Response** - Server returns payment requirements
-3. **Parse Requirements** - Extract from `PAYMENT-REQUIRED` header
-4. **Create Payment** - Sign authorization with wallet
-5. **Retry with Payment** - Include `PAYMENT-SIGNATURE` header
-6. **Receive Resource** - Get response with `PAYMENT-RESPONSE` settlement details
+| Purpose | v1 (Legacy) | v2 (Current) |
+|---------|-------------|--------------|
+| Fetch wrapper | `x402-fetch` | `@x402/fetch` |
+| Axios wrapper | `x402-axios` | `@x402/axios` |
+| Core types | `x402` | `@x402/core` |
+| EVM support | Built into x402-fetch | `@x402/evm` |
+| Solana support | Built into x402-fetch | `@x402/svm` |
 
-## Network Support
+## Network Identifiers
 
-**Default: Base Mainnet (`eip155:8453`)** - Use this for production payments.
-
-| Network | CAIP-2 ID | Environment |
-|---------|-----------|-------------|
-| Base Mainnet | `eip155:8453` | Production (default) |
-| Avalanche C-Chain | `eip155:43114` | Production |
-| Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | Production |
-| Base Sepolia | `eip155:84532` | Testnet |
-| Avalanche Fuji | `eip155:43113` | Testnet |
-| Solana Devnet | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | Testnet |
+| Network | v1 ID | v2 CAIP-2 ID | Environment |
+|---------|-------|--------------|-------------|
+| Base Mainnet | `base` | `eip155:8453` | Production |
+| Base Sepolia | `base-sepolia` | `eip155:84532` | Testnet |
+| Avalanche C-Chain | `avalanche` | `eip155:43114` | Production |
+| Avalanche Fuji | `avalanche-fuji` | `eip155:43113` | Testnet |
+| Solana Mainnet | `solana` | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | Production |
+| Solana Devnet | `solana-devnet` | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | Testnet |
 
 ## USDC Token Addresses
 
 | Network | USDC Address |
 |---------|-------------|
-| Base Mainnet (`eip155:8453`) | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| Base Sepolia (`eip155:84532`) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
-| Avalanche (`eip155:43114`) | `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` |
+| Base Mainnet | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+| Base Sepolia | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| Avalanche | `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` |
 | Solana Mainnet | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
 
-## Multi-Network Client Setup
+## Complete Working Examples
+
+### Example 1: Calling a v1 Endpoint
 
 ```typescript
-import { x402Client } from "@x402/core/client";
+// call-v1-endpoint.ts
+import { wrapFetchWithPayment, createSigner, decodeXPaymentResponse } from "x402-fetch";
+
+const privateKey = "0x..." as `0x${string}`; // Your private key
+const walletAddress = "0x..."; // Your wallet address
+
+async function main() {
+  // Step 1: Check what version the endpoint uses
+  const checkResponse = await fetch("https://example.com/api/data");
+  if (checkResponse.status === 402) {
+    const body = await checkResponse.json();
+    console.log("x402 Version:", body.x402Version);
+    console.log("Network:", body.accepts[0].network);
+    console.log("Price:", body.accepts[0].maxAmountRequired, "atomic units");
+  }
+
+  // Step 2: Create signer with v1 network string
+  const signer = await createSigner("base", privateKey); // Use network from response
+
+  // Step 3: Wrap fetch and make paid request
+  const fetchWithPayment = wrapFetchWithPayment(fetch, signer);
+  const response = await fetchWithPayment("https://example.com/api/data");
+  const data = await response.json();
+  console.log("Response:", data);
+
+  // Step 4: Check payment receipt
+  const receipt = response.headers.get("x-payment-response");
+  if (receipt) {
+    console.log("Payment settled:", decodeXPaymentResponse(receipt));
+  }
+}
+
+main().catch(console.error);
+```
+
+### Example 2: Calling a v2 Endpoint
+
+```typescript
+// call-v2-endpoint.ts
+import { wrapFetchWithPayment, x402Client, x402HTTPClient } from "@x402/fetch";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
-import { registerExactSvmScheme } from "@x402/svm/exact/client";
 import { privateKeyToAccount } from "viem/accounts";
-import { createKeyPairSignerFromBytes } from "@solana/kit";
-import { base58 } from "@scure/base";
 
-const evmSigner = privateKeyToAccount(process.env.EVM_PRIVATE_KEY as `0x${string}`);
-const svmSigner = await createKeyPairSignerFromBytes(
-  base58.decode(process.env.SOLANA_PRIVATE_KEY!)
-);
+const privateKey = "0x..." as `0x${string}`;
 
-const client = new x402Client();
-registerExactEvmScheme(client, { signer: evmSigner });
-registerExactSvmScheme(client, { signer: svmSigner });
+async function main() {
+  // Step 1: Check what version the endpoint uses
+  const checkResponse = await fetch("https://example.com/api/data");
+  if (checkResponse.status === 402) {
+    const hasV2Header = checkResponse.headers.get("PAYMENT-REQUIRED");
+    console.log("Is v2:", !!hasV2Header);
+  }
+
+  // Step 2: Setup v2 client
+  const signer = privateKeyToAccount(privateKey);
+  const client = new x402Client();
+  registerExactEvmScheme(client, { signer });
+
+  // Step 3: Make paid request
+  const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+  const response = await fetchWithPayment("https://example.com/api/data");
+  const data = await response.json();
+  console.log("Response:", data);
+
+  // Step 4: Check payment receipt
+  const receipt = response.headers.get("PAYMENT-RESPONSE");
+  if (receipt) {
+    console.log("Payment settled");
+  }
+}
+
+main().catch(console.error);
 ```
 
 ## Service Discovery (Bazaar)
 
-The Bazaar helps agents find x402-enabled services.
+Find x402-enabled services without knowing URLs in advance.
 
-### Discover Available Services
+```bash
+# Quick discovery via curl
+curl -s "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources?type=http&limit=50" | jq '.items[] | {url: .resource, price: .accepts[0].maxAmountRequired, version: .x402Version}'
+```
+
+### Programmatic Discovery
 
 ```typescript
 import { HTTPFacilitatorClient } from "@x402/core/http";
 import { withBazaar } from "@x402/extensions";
 
-// Mainnet facilitator (default)
 const facilitatorClient = new HTTPFacilitatorClient({
   url: "https://api.cdp.coinbase.com/platform/v2/x402"
-  // Testnet: url: "https://x402.org/facilitator"
 });
 const client = withBazaar(facilitatorClient);
 
 const response = await client.extensions.discovery.listResources({ type: "http" });
-```
 
-### Filter and Call Services
-
-```typescript
-// Filter by price (under $0.10)
-const usdcAsset = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-const maxPrice = 100000;
-
-const affordableServices = response.items.filter(item =>
-  item.accepts.find(req =>
-    req.asset === usdcAsset &&
-    Number(req.maxAmountRequired) < maxPrice
-  )
+// Filter by price (under $0.01 = 10000 atomic units)
+const affordable = response.items.filter(item =>
+  Number(item.accepts[0].maxAmountRequired) < 10000
 );
-
-// Call a discovered service
-const selectedService = affordableServices[0];
-const api = wrapAxiosWithPayment(axios.create(), client);
-const result = await api.get(selectedService.resource);
-```
-
-## Manual 402 Handling
-
-```typescript
-import { x402Client } from "@x402/core/client";
-import {
-  decodePaymentRequiredHeader,
-  encodePaymentSignatureHeader,
-} from "@x402/core/http";
-
-let response = await fetch(url);
-
-if (response.status === 402) {
-  const paymentRequired = decodePaymentRequiredHeader(
-    response.headers.get("PAYMENT-REQUIRED")
-  );
-  const paymentPayload = await client.createPaymentPayload(paymentRequired);
-  const paymentHeader = encodePaymentSignatureHeader(paymentPayload);
-
-  response = await fetch(url, {
-    headers: { "PAYMENT-SIGNATURE": paymentHeader }
-  });
-}
 ```
 
 ## Payment Amounts
@@ -181,6 +258,7 @@ if (response.status === 402) {
 | Amount (atomic) | USDC Value |
 |-----------------|------------|
 | `1000` | $0.001 (0.1 cents) |
+| `2000` | $0.002 |
 | `10000` | $0.01 (1 cent) |
 | `100000` | $0.10 (10 cents) |
 | `1000000` | $1.00 |
@@ -189,24 +267,24 @@ if (response.status === 402) {
 
 1. **Create wallet** - Run `echo "1" | npx add-wallet evm` (non-interactive)
 2. **Note the address** - Check `.env` for `WALLET_ADDRESS`
-3. **Fund wallet** - Get USDC on Base mainnet (or run `npx add-wallet topup testnet` for testing)
-4. **Install SDK** - `npm install @x402/fetch @x402/evm viem`
-5. **Register scheme** - `registerExactEvmScheme(client, { signer })`
-6. **Wrap fetch** - `wrapFetchWithPayment(fetch, client)`
-7. **Make requests** - SDK handles 402 → payment → retry automatically on Base mainnet
+3. **Fund wallet** - Send USDC on Base mainnet (or `npx add-wallet topup testnet`)
+4. **Check endpoint** - `curl -i <url>` to see x402 version and price
+5. **Install correct packages** - v1: `x402-fetch`, v2: `@x402/fetch @x402/evm`
+6. **Use correct code pattern** - v1: `createSigner()`, v2: `registerExactEvmScheme()`
+7. **Make request** - SDK handles 402 → payment → retry automatically
 
-## Key Packages
+## Troubleshooting
 
-### TypeScript
-- `@x402/fetch` - Fetch wrapper with auto payment
-- `@x402/axios` - Axios interceptor with auto payment
-- `@x402/core` - Core types and utilities
-- `@x402/evm` - EVM network support
-- `@x402/svm` - Solana network support
+### "EIP-712 domain parameters required" Error
+You're using v2 packages (`@x402/fetch`) on a v1 endpoint. Check the 402 response - if `x402Version: 1`, use `x402-fetch` instead.
 
-### Go
-- `github.com/coinbase/x402/go` - Core client
-- `github.com/coinbase/x402/go/http` - HTTP wrapper
+### "No scheme registered" Error
+The network in the 402 response isn't registered. For v2, make sure you called `registerExactEvmScheme(client, { signer })`.
+
+### Payment not going through
+1. Check wallet has sufficient USDC balance on the correct network
+2. Verify you're using the right network (mainnet vs testnet)
+3. Check the `network` field in the 402 response matches your setup
 
 ## Protocol References
 
