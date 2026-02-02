@@ -21,11 +21,13 @@ skills/
   buy/                    # Buyer/client skill
     SKILL.md              # Main instructions
     references/           # Protocol documentation
-      wallet-setup.md
+      wallet-setup.md     # Wallet creation guide (incl. non-interactive CLI)
       v1-protocol.md
       v2-protocol.md
   sell/                   # Seller/server skill
     SKILL.md              # Main instructions
+    references/           # Protocol documentation
+      wallet-setup.md     # Wallet creation guide (incl. non-interactive CLI)
 ```
 
 ## SKILL.md Format

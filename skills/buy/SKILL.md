@@ -15,13 +15,27 @@ x402 is an open payment standard that enables programmatic payments over HTTP. W
 
 ### 1. Setup Wallet
 
-Create a wallet using `npx add-wallet` and select wallet type (EVM or Solana).
+**Non-interactive CLI commands (for AI agents):**
 
-Or use a private key directly:
+```bash
+# EVM wallet (Base, Ethereum, Avalanche) - pipes "1" to select EOA
+echo "1" | npx add-wallet evm
+
+# Solana wallet
+npx add-wallet sol
+
+# Top up with testnet USDC
+npx add-wallet topup testnet
+```
+
+This creates a `.env` file with `WALLET_ADDRESS` and `WALLET_PRIVATE_KEY`.
+
+**Or use a private key directly:**
 
 ```typescript
 import { privateKeyToAccount } from "viem/accounts";
-const signer = privateKeyToAccount(process.env.EVM_PRIVATE_KEY as `0x${string}`);
+const signer = privateKeyToAccount(process.env.WALLET_PRIVATE_KEY as `0x${string}`);
+console.log("Address:", signer.address);
 ```
 
 ### 2. Install Packages
@@ -43,6 +57,7 @@ const client = new x402Client();
 registerExactEvmScheme(client, { signer });
 
 const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+// SDK automatically handles 402 responses and pays on Base mainnet (eip155:8453)
 const response = await fetchWithPayment("https://api.example.com/paid", { method: "GET" });
 ```
 
@@ -57,14 +72,16 @@ const response = await fetchWithPayment("https://api.example.com/paid", { method
 
 ## Network Support
 
-| Network | CAIP-2 ID | Testnet |
-|---------|-----------|---------|
-| Base Sepolia | `eip155:84532` | Yes |
-| Base Mainnet | `eip155:8453` | No |
-| Avalanche Fuji | `eip155:43113` | Yes |
-| Avalanche C-Chain | `eip155:43114` | No |
-| Solana Devnet | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | Yes |
-| Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | No |
+**Default: Base Mainnet (`eip155:8453`)** - Use this for production payments.
+
+| Network | CAIP-2 ID | Environment |
+|---------|-----------|-------------|
+| Base Mainnet | `eip155:8453` | Production (default) |
+| Avalanche C-Chain | `eip155:43114` | Production |
+| Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | Production |
+| Base Sepolia | `eip155:84532` | Testnet |
+| Avalanche Fuji | `eip155:43113` | Testnet |
+| Solana Devnet | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | Testnet |
 
 ## USDC Token Addresses
 
@@ -105,8 +122,10 @@ The Bazaar helps agents find x402-enabled services.
 import { HTTPFacilitatorClient } from "@x402/core/http";
 import { withBazaar } from "@x402/extensions";
 
+// Mainnet facilitator (default)
 const facilitatorClient = new HTTPFacilitatorClient({
   url: "https://api.cdp.coinbase.com/platform/v2/x402"
+  // Testnet: url: "https://x402.org/facilitator"
 });
 const client = withBazaar(facilitatorClient);
 
@@ -168,12 +187,13 @@ if (response.status === 402) {
 
 ## Setup Checklist
 
-1. **Create wallet** - Run `npx add-wallet`
-2. **Fund wallet** - Get testnet USDC from https://faucet.circle.com/
-3. **Install SDK** - `npm install @x402/fetch @x402/evm`
-4. **Register scheme** - `registerExactEvmScheme(client, { signer })`
-5. **Wrap fetch** - `wrapFetchWithPayment(fetch, client)`
-6. **Make requests** - SDK handles 402 → payment → retry automatically
+1. **Create wallet** - Run `echo "1" | npx add-wallet evm` (non-interactive)
+2. **Note the address** - Check `.env` for `WALLET_ADDRESS`
+3. **Fund wallet** - Get USDC on Base mainnet (or run `npx add-wallet topup testnet` for testing)
+4. **Install SDK** - `npm install @x402/fetch @x402/evm viem`
+5. **Register scheme** - `registerExactEvmScheme(client, { signer })`
+6. **Wrap fetch** - `wrapFetchWithPayment(fetch, client)`
+7. **Make requests** - SDK handles 402 → payment → retry automatically on Base mainnet
 
 ## Key Packages
 

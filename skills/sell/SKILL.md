@@ -15,15 +15,29 @@ x402 allows servers to payment-gate endpoints. When clients request a protected 
 
 ### 1. Setup Receiving Wallet
 
-Create a wallet to receive payments:
+Create a wallet to receive payments.
+
+**Non-interactive CLI commands (for AI agents):**
 
 ```bash
-npx add-wallet
+# EVM wallet (Base, Ethereum, Avalanche) - pipes "1" to select EOA
+echo "1" | npx add-wallet evm
+
+# Solana wallet
+npx add-wallet sol
+
+# Top up with testnet USDC (for testing payments)
+npx add-wallet topup testnet
 ```
 
-Select wallet type (EVM or Solana) when prompted.
+This creates a `.env` file with `WALLET_ADDRESS` and `WALLET_PRIVATE_KEY`.
+
+**Use the address in your code:**
 
 ```typescript
+// Read from .env or use directly
+const payTo = process.env.WALLET_ADDRESS; // From .env file
+// or
 const payTo = "0xYourWalletAddress"; // EVM address
 // or
 const payTo = "YourSolanaAddress";   // Solana address
@@ -57,8 +71,8 @@ const app = express();
 const payTo = "0xYourAddress";
 
 const facilitatorClient = new HTTPFacilitatorClient({
-  url: "https://x402.org/facilitator"  // Testnet
-  // url: "https://api.cdp.coinbase.com/platform/v2/x402"  // Mainnet
+  url: "https://api.cdp.coinbase.com/platform/v2/x402"  // Mainnet (default)
+  // url: "https://x402.org/facilitator"  // Testnet
 });
 
 const server = new x402ResourceServer(facilitatorClient);
@@ -72,7 +86,7 @@ app.use(
           {
             scheme: "exact",
             price: "$0.001",
-            network: "eip155:84532",
+            network: "eip155:8453",  // Base Mainnet (use eip155:84532 for testnet)
             payTo,
           },
         ],
@@ -93,10 +107,12 @@ app.listen(4021);
 
 ## Facilitator URLs
 
+**Default: Mainnet (CDP)** - Use for production payments.
+
 | Environment | URL |
 |-------------|-----|
+| Mainnet (CDP) | `https://api.cdp.coinbase.com/platform/v2/x402` (default) |
 | Testnet | `https://x402.org/facilitator` |
-| Mainnet (CDP) | `https://api.cdp.coinbase.com/platform/v2/x402` |
 
 ## Price Format
 
@@ -111,14 +127,16 @@ The `price` field uses dollar notation. SDK converts to atomic units automatical
 
 ## Network Identifiers (CAIP-2)
 
-| Network | CAIP-2 ID | Testnet |
-|---------|-----------|---------|
-| Base Sepolia | `eip155:84532` | Yes |
-| Base Mainnet | `eip155:8453` | No |
-| Avalanche Fuji | `eip155:43113` | Yes |
-| Avalanche C-Chain | `eip155:43114` | No |
-| Solana Devnet | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | Yes |
-| Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | No |
+**Default: Base Mainnet (`eip155:8453`)** - Use for production payments.
+
+| Network | CAIP-2 ID | Environment |
+|---------|-----------|-------------|
+| Base Mainnet | `eip155:8453` | Production (default) |
+| Avalanche C-Chain | `eip155:43114` | Production |
+| Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | Production |
+| Base Sepolia | `eip155:84532` | Testnet |
+| Avalanche Fuji | `eip155:43113` | Testnet |
+| Solana Devnet | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | Testnet |
 
 ## USDC Token Addresses
 
@@ -140,7 +158,7 @@ import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { registerExactEvmScheme } from "@x402/evm/exact/server";
 
 const facilitatorClient = new HTTPFacilitatorClient({
-  url: "https://x402.org/facilitator"
+  url: "https://api.cdp.coinbase.com/platform/v2/x402"  // Mainnet
 });
 const server = new x402ResourceServer(facilitatorClient);
 registerExactEvmScheme(server);
@@ -148,7 +166,7 @@ registerExactEvmScheme(server);
 export const middleware = paymentProxy(
   {
     "/api/protected": {
-      accepts: [{ scheme: "exact", price: "$0.01", network: "eip155:84532", payTo: "0xYour" }],
+      accepts: [{ scheme: "exact", price: "$0.01", network: "eip155:8453", payTo: "0xYour" }],
       description: "Protected content",
     },
   },
@@ -167,7 +185,7 @@ import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { registerExactEvmScheme } from "@x402/evm/exact/server";
 
 const app = new Hono();
-const facilitatorClient = new HTTPFacilitatorClient({ url: "https://x402.org/facilitator" });
+const facilitatorClient = new HTTPFacilitatorClient({ url: "https://api.cdp.coinbase.com/platform/v2/x402" });
 const server = new x402ResourceServer(facilitatorClient);
 registerExactEvmScheme(server);
 
@@ -175,7 +193,7 @@ app.use(
   paymentMiddleware(
     {
       "/paid": {
-        accepts: [{ scheme: "exact", price: "$0.10", network: "eip155:84532", payTo: "0xYour" }],
+        accepts: [{ scheme: "exact", price: "$0.10", network: "eip155:8453", payTo: "0xYour" }],
       },
     },
     server,
@@ -200,21 +218,21 @@ func main() {
     r := gin.Default()
 
     facilitatorClient := x402http.NewHTTPFacilitatorClient(&x402http.FacilitatorConfig{
-        URL: "https://x402.org/facilitator",
+        URL: "https://api.cdp.coinbase.com/platform/v2/x402",  // Mainnet
     })
 
     r.Use(ginmw.X402Payment(ginmw.Config{
         Routes: x402http.RoutesConfig{
             "GET /weather": {
                 Accepts: x402http.PaymentOptions{
-                    {Scheme: "exact", Price: "$0.001", Network: "eip155:84532", PayTo: "0xYour"},
+                    {Scheme: "exact", Price: "$0.001", Network: "eip155:8453", PayTo: "0xYour"},
                 },
                 Description: "Weather data",
             },
         },
         Facilitator: facilitatorClient,
         Schemes: []ginmw.SchemeConfig{
-            {Network: "eip155:84532", Server: evm.NewExactEvmScheme()},
+            {Network: "eip155:8453", Server: evm.NewExactEvmScheme()},
         },
     }))
 
@@ -239,14 +257,14 @@ app = FastAPI()
 pay_to = "0xYourAddress"
 
 facilitator = HTTPFacilitatorClient(
-    FacilitatorConfig(url="https://x402.org/facilitator")
+    FacilitatorConfig(url="https://api.cdp.coinbase.com/platform/v2/x402")  # Mainnet
 )
 server = x402ResourceServer(facilitator)
-server.register("eip155:84532", ExactEvmServerScheme())
+server.register("eip155:8453", ExactEvmServerScheme())
 
 routes = {
     "GET /weather": RouteConfig(
-        accepts=[PaymentOption(scheme="exact", pay_to=pay_to, price="$0.001", network="eip155:84532")],
+        accepts=[PaymentOption(scheme="exact", pay_to=pay_to, price="$0.001", network="eip155:8453")],
         description="Weather data",
     ),
 }
@@ -260,7 +278,7 @@ async def get_weather():
 
 ## Multi-Network Support
 
-Accept payments on both EVM and Solana:
+Accept payments on both EVM and Solana (mainnet):
 
 ```typescript
 import { registerExactEvmScheme } from "@x402/evm/exact/server";
@@ -275,8 +293,8 @@ app.use(
     {
       "GET /data": {
         accepts: [
-          { scheme: "exact", price: "$0.01", network: "eip155:8453", payTo: "0xYourEvmAddress" },
-          { scheme: "exact", price: "$0.01", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", payTo: "YourSolanaAddress" },
+          { scheme: "exact", price: "$0.01", network: "eip155:8453", payTo: "0xYourEvmAddress" },  // Base Mainnet
+          { scheme: "exact", price: "$0.01", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", payTo: "YourSolanaAddress" },  // Solana Mainnet
         ],
       },
     },
@@ -296,7 +314,7 @@ app.use(
   paymentMiddleware(
     {
       "GET /weather": {
-        accepts: [{ scheme: "exact", price: "$0.001", network: "eip155:8453", payTo }],
+        accepts: [{ scheme: "exact", price: "$0.001", network: "eip155:8453", payTo }],  // Base Mainnet
         description: "Real-time weather data",
         mimeType: "application/json",
         extensions: {
@@ -334,13 +352,13 @@ curl -i http://localhost:4021/weather
 
 ## Setup Checklist
 
-1. **Get a wallet address** - Run `npx add-wallet`
-2. **Choose network** - Start with `eip155:84532` (Base Sepolia)
-3. **Set price** - Use dollar notation (`"$0.001"`)
-4. **Configure facilitator** - Use `https://x402.org/facilitator` for testnet
-5. **Add middleware** - Protect routes with payment requirements
-6. **Test** - curl should return 402 with payment instructions
-7. **Go mainnet** - Switch to `eip155:8453` and CDP facilitator URL
+1. **Get a wallet address** - Run `echo "1" | npx add-wallet evm` (non-interactive)
+2. **Note the address** - Check `.env` for `WALLET_ADDRESS` to use as `payTo`
+3. **Choose network** - Use `eip155:8453` (Base Mainnet) for production, or `eip155:84532` (Base Sepolia) for testing
+4. **Set price** - Use dollar notation (`"$0.001"`)
+5. **Configure facilitator** - Use `https://api.cdp.coinbase.com/platform/v2/x402` for mainnet (or `https://x402.org/facilitator` for testnet)
+6. **Add middleware** - Protect routes with payment requirements
+7. **Test** - curl should return 402 with payment instructions
 
 ## Key Packages
 
