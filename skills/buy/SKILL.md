@@ -263,23 +263,140 @@ const affordable = response.items.filter(item =>
 | `100000` | $0.10 (10 cents) |
 | `1000000` | $1.00 |
 
+## Extracting Endpoint Requirements (Method, Body, Schema)
+
+Many x402 endpoints include detailed input/output schemas in their 402 response. This tells you:
+- What HTTP method to use (GET, POST, etc.)
+- What body format (JSON, form-data)
+- Required and optional fields
+
+### Step 1: Get the 402 Response
+
+```bash
+# Try GET first
+curl -i "https://example.com/api/endpoint"
+
+# If you get 405 Method Not Allowed, try POST
+curl -i -X POST "https://example.com/api/endpoint" -H "Content-Type: application/json"
+```
+
+### Step 2: Decode and Inspect the Payment Header
+
+For v2 endpoints, decode the `PAYMENT-REQUIRED` header:
+
+```bash
+# Extract and decode the header (save full header value to a file or variable)
+echo "<base64-payment-required-value>" | base64 -d | jq '.'
+```
+
+### Step 3: Find the Input Schema
+
+Look for `extensions.bazaar.schema.properties.input` in the decoded response:
+
+```json
+{
+  "x402Version": 2,
+  "accepts": [...],
+  "extensions": {
+    "bazaar": {
+      "info": {
+        "input": {
+          "type": "http",
+          "method": "POST",        // <-- HTTP method
+          "bodyType": "json",      // <-- Body format
+          "body": {}
+        }
+      },
+      "schema": {
+        "properties": {
+          "input": {
+            "properties": {
+              "body": {
+                "properties": {
+                  "urls": { "type": "array", "items": { "type": "string" } },  // Required field
+                  "text": { "type": "boolean" }  // Optional field
+                },
+                "required": ["urls"]  // <-- Required fields listed here
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Step 4: Build Your Request
+
+Based on the schema above:
+
+```typescript
+const response = await fetchWithPayment("https://example.com/api/endpoint", {
+  method: "POST",  // From info.input.method
+  headers: { "Content-Type": "application/json" },  // From info.input.bodyType
+  body: JSON.stringify({
+    urls: ["https://example.com"],  // Required field
+    text: true  // Optional field
+  })
+});
+```
+
+### Quick Schema Extraction (One-liner)
+
+```bash
+curl -s -X POST "https://example.com/api/endpoint" -H "Content-Type: application/json" | \
+  jq -r 'if .accepts then . else empty end' 2>/dev/null || \
+  echo "Check PAYMENT-REQUIRED header for v2"
+```
+
+For v2 with header:
+```bash
+curl -si -X POST "https://example.com/api/endpoint" -H "Content-Type: application/json" | \
+  grep -i "payment-required:" | cut -d' ' -f2 | base64 -d | \
+  jq '{method: .extensions.bazaar.info.input.method, bodyType: .extensions.bazaar.info.input.bodyType, required: .extensions.bazaar.schema.properties.input.properties.body.required}'
+```
+
+### Common Patterns
+
+| If you see... | Then use... |
+|---------------|-------------|
+| `"method": "GET"` | `fetch(url)` |
+| `"method": "POST"` + `"bodyType": "json"` | `fetch(url, { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({...}) })` |
+| `"method": "POST"` + `"bodyType": "form-data"` | `fetch(url, { method: "POST", body: formData })` |
+| No `extensions.bazaar` | Try GET first, then POST if 405 |
+
 ## Setup Checklist
 
 1. **Create wallet** - Run `echo "1" | npx add-wallet evm` (non-interactive)
 2. **Note the address** - Check `.env` for `WALLET_ADDRESS`
 3. **Fund wallet** - Send USDC on Base mainnet (or `npx add-wallet topup testnet`)
-4. **Check endpoint** - `curl -i <url>` to see x402 version and price
-5. **Install correct packages** - v1: `x402-fetch`, v2: `@x402/fetch @x402/evm`
-6. **Use correct code pattern** - v1: `createSigner()`, v2: `registerExactEvmScheme()`
-7. **Make request** - SDK handles 402 → payment → retry automatically
+4. **Check endpoint** - `curl -i <url>` to see:
+   - x402 version (v1 or v2)
+   - Price (amount field)
+   - Network (mainnet or testnet)
+   - If 405, try `curl -i -X POST <url>`
+5. **Extract schema** - Decode `PAYMENT-REQUIRED` header to find method, body format, required fields
+6. **Install correct packages** - v1: `x402-fetch`, v2: `@x402/fetch @x402/evm`
+7. **Use correct code pattern** - v1: `createSigner()`, v2: `registerExactEvmScheme()`
+8. **Build request** - Use method/body from schema, SDK handles 402 → payment → retry
 
 ## Troubleshooting
+
+### HTTP 405 Method Not Allowed
+The endpoint requires a different HTTP method. Try POST instead of GET:
+```bash
+curl -i -X POST "https://example.com/api/endpoint" -H "Content-Type: application/json"
+```
 
 ### "EIP-712 domain parameters required" Error
 You're using v2 packages (`@x402/fetch`) on a v1 endpoint. Check the 402 response - if `x402Version: 1`, use `x402-fetch` instead.
 
 ### "No scheme registered" Error
 The network in the 402 response isn't registered. For v2, make sure you called `registerExactEvmScheme(client, { signer })`.
+
+### Payment succeeds but response is empty or error
+You might be missing required body fields. Decode the `PAYMENT-REQUIRED` header and check `extensions.bazaar.schema` for required fields.
 
 ### Payment not going through
 1. Check wallet has sufficient USDC balance on the correct network
