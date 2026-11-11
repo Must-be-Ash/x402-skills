@@ -1,5 +1,7 @@
 # x402 Skills
 
+> **Not maintained.** x402 and the services this uses may have changed since it was built; check the latest x402 docs before relying on it.
+
 Skills for AI agents to buy and sell using the x402 payment protocol. Enable autonomous micropayments over HTTP with USDC on Base and Solana.
 
 Skills follow the [Agent Skills](https://skills.sh/) format.
